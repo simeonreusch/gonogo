@@ -1,16 +1,21 @@
 import datetime
 import json
 import logging
+import os
 from base64 import b64decode
 from io import BytesIO
 from pprint import pprint
 from typing import Dict
 
-import astropy_healpix as ah  # type: ignore
 import numpy as np
 from astropy.table import Table  # type: ignore
+
+import astropy_healpix as ah  # type: ignore
 from confluent_kafka import TopicPartition  # type: ignore
 from gcn_kafka import Consumer  # type: ignore
+
+LVK_GCN_ID = os.environ.get("LVK_GCN_ID")
+LVK_GCN_TOKEN = os.environ.get("LVK_GCN_TOKEN")
 
 PNS_THRESHOLD_DELIBERATE: float = 0.1
 PNS_THRESHOLD_GO: float = 0.5
@@ -136,9 +141,15 @@ def decide(record: dict) -> dict | None:
         return None
 
 
+def check_credentials():
+    if LVK_GCN_TOKEN is None or LVK_GCN_ID is None:
+        raise ValueError(f"You need to export 'LVK_GCN_ID' and 'LVK_GCN_TOKEN'")
+
+
+check_credentials()
 consumer = Consumer(
-    client_id="2c954gdsc6l3cv8p6al5prv08s",
-    client_secret="1c7n24c4pptu57s5je3os3m32vedrksgttvq677cdn1pmfkhjv3g",
+    client_id=LVK_GCN_ID,
+    client_secret=LVK_GCN_TOKEN,
 )
 consumer.subscribe(["igwn.gwalert"])
 
