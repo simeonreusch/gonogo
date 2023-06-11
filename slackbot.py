@@ -147,10 +147,13 @@ def decide(record: dict) -> dict | None:
         return None
 
 
-def post_on_slack(decision: str, slack_client: WebClient) -> None:
+def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
     """
     Post the decision on Slack
     """
+    if decision is None:
+        return None
+
     if decision["status"] == "nogo":
         text = f"*{decision['id']}: NO GO*\n"
         reason = decision["reason"]
@@ -181,6 +184,8 @@ def post_on_slack(decision: str, slack_client: WebClient) -> None:
 
     logger.info(f"Posting on Slack:\n{text}")
     slack_client.chat_postMessage(channel="#go-nogo", text=text)
+
+    return None
 
 
 def check_credentials():
