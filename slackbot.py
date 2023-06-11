@@ -230,7 +230,7 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
         if len(reason) > 0:
             text += "Reason: "
             for r in reason:
-                text += f"{r}   "
+                text += f"{r}    "
 
     if decision["status"] == "deliberate":
         text = f"*{decision['id']} ({pipeline} event): DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
@@ -246,7 +246,7 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
         if len(reason) > 0:
             text += "Reason: "
             for r in reason:
-                text += f"{r}   "
+                text += f"{r}    "
 
     if decision["status"] == "go_deep":
         text = f"*{decision['id']} ({pipeline} event): GO DEEP*\n"
@@ -254,7 +254,7 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
         if len(reason) > 0:
             text += "Reason: "
             for r in reason:
-                text += f"{r}   "
+                text += f"{r}    "
 
     logger.info(f"Posting on Slack:\n{text}")
     slack_client.chat_postMessage(channel="#go-nogo", text=text)
