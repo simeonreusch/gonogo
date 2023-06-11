@@ -226,13 +226,15 @@ def save_event(record: dict) -> None:
     """
     Save the event as json
     """
+    event_id = record["event_id"]
+
     event_dir = Path(__file__).parents[0] / "events"
-    event_dir.mkdir(exists_ok=True, parents=True)
+    event_dir.mkdir(exist_ok=True, parents=True)
 
     event_file = event_dir / f"{event_id}.json"
 
     with open(event_file, "w") as f:
-        json.dump(event_file, f)
+        json.dump(record, f)
 
     logger.info(f"Saved event to {event_file}")
 
