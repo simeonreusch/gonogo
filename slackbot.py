@@ -158,6 +158,7 @@ def post_on_slack(decision: str, slack_client: WebClient) -> None:
             text += "Reason: "
             for r in reason:
                 text += f"{r}   "
+
     if decision["status"] == "deliberate":
         text = f"*{decision['id']}: DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
         text += f"Parameters: \nFAR: {decision['FAR']:.2E}\np(NS): {decision['pNS']:.2f}\nHas Remnant: {decision['hasRemnant']:.2f}"
@@ -178,6 +179,7 @@ def post_on_slack(decision: str, slack_client: WebClient) -> None:
             for r in reason:
                 text += f"{r}   "
 
+    logger.info(f"Posting on Slack:\n{text}")
     slack_client.chat_postMessage(channel="#go-nogo", text=text)
 
 
