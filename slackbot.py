@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Author: Simeon Reusch (simeon.reusch@desy.de)
+# License: BSD-3-Clause
+
 import datetime
 import json
 import logging
@@ -13,9 +17,11 @@ from astropy.table import Table  # type: ignore
 import astropy_healpix as ah  # type: ignore
 from confluent_kafka import TopicPartition  # type: ignore
 from gcn_kafka import Consumer  # type: ignore
+from slack import WebClient
 
 LVK_GCN_ID = os.environ.get("LVK_GCN_ID")
 LVK_GCN_TOKEN = os.environ.get("LVK_GCN_TOKEN")
+SLACK_TOKEN = os.environ.get("SLACK_TOKEN_GONOGO")
 
 PNS_THRESHOLD_DELIBERATE: float = 0.1
 PNS_THRESHOLD_GO: float = 0.5
@@ -100,14 +106,14 @@ def decide(record: dict) -> dict | None:
         ):
             if far < FAR_THRESHOLD_CENTURY:
                 status["status"] = "go_deep"
-                reason.append(f"FAR < 1/century ({far})")
+                reason.append(f"FAR < 1/century ({far:.2E})")
                 status["reason"] = reason
 
                 return status
 
             if far < FAR_THRESHOLD_DECADE:
-                status["status"] = "go_deep"
-                reason.append(f"1/century < FAR < 1/decade ({far})")
+                status["status"] = "go_wide"
+                reason.append(f"1/century < FAR < 1/decade ({far:.2E})")
                 status["reason"] = reason
 
                 return status
@@ -118,7 +124,7 @@ def decide(record: dict) -> dict | None:
             and has_ns > HAS_NS_THRESHOLD_DELIBERATE
         ):
             status["status"] = "deliberate"
-            reason.append(f"FAR < 1/year ({far})")
+            reason.append(f"FAR < 1/year ({far:.2E})")
             status["reason"] = reason
 
             return status
@@ -126,11 +132,11 @@ def decide(record: dict) -> dict | None:
         else:
             status["status"] = "nogo"
             if far >= FAR_THRESHOLD_YEAR:
-                reason.append(f"FAR >= 1/year ({far})")
+                reason.append(f"FAR >= 1/year ({far:.2E})")
             if has_ns <= HAS_NS_THRESHOLD_DELIBERATE:
-                reason.append(f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns})")
+                reason.append(f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns:.2f})")
             if combined_ns <= PNS_THRESHOLD_DELIBERATE:
-                reason.append(f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns})")
+                reason.append(f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})")
             status["reason"] = reason
 
             return status
@@ -141,30 +147,61 @@ def decide(record: dict) -> dict | None:
         return None
 
 
+def post_on_slack(decision: str, slack_client: WebClient) -> None:
+    """
+    Post the decision on Slack
+    """
+    if decision["status"] == "nogo":
+        text = f"*{decision['id']}: NO GO*\n"
+        reason = decision["reason"]
+        if len(reason) > 0:
+            text += "Reason: "
+            for r in reason:
+                text += f"{r}   "
+    if decision["status"] == "deliberate":
+        text = f"*{decision['id']}: DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
+        text += f"Parameters: \nFAR: {decision['FAR']:.2E}\np(NS): {decision['pNS']:.2f}\nHas Remnant: {decision['hasRemnant']:.2f}"
+
+    if decision["status"] == "go_wide":
+        text = f"*{decision['id']}: GO WIDE*\n"
+        reason = decision["reason"]
+        if len(reason) > 0:
+            text += "Reason: "
+            for r in reason:
+                text += f"{r}   "
+
+    if decision["status"] == "go_deep":
+        text = f"*{decision['id']}: GO DEEP*\n"
+        reason = decision["reason"]
+        if len(reason) > 0:
+            text += "Reason: "
+            for r in reason:
+                text += f"{r}   "
+
+    slack_client.chat_postMessage(channel="#go-nogo", text=text)
+
+
 def check_credentials():
-    if LVK_GCN_TOKEN is None or LVK_GCN_ID is None:
+    if LVK_GCN_TOKEN is None or LVK_GCN_ID is None or SLACK_TOKEN is None:
         raise ValueError(f"You need to export 'LVK_GCN_ID' and 'LVK_GCN_TOKEN'")
 
 
-check_credentials()
-consumer = Consumer(
-    client_id=LVK_GCN_ID,
-    client_secret=LVK_GCN_TOKEN,
-)
-consumer.subscribe(["igwn.gwalert"])
+if __name__ == "__main__":
+    slack_client = WebClient(token=SLACK_TOKEN)
 
-logger.info("Listening to Kafka stream")
+    check_credentials()
 
-while True:
-    for message in consumer.consume():
-        record = parse_notice(message.value())
-        if record is not None:
-            decision = decide(record)
-            logger.info(decision)
+    consumer = Consumer(
+        client_id=LVK_GCN_ID,
+        client_secret=LVK_GCN_TOKEN,
+    )
+    consumer.subscribe(["igwn.gwalert"])
 
-# with open("MS181101ab-preliminary.json", "r") as f:
-#     infile = f.read()
+    logger.info("Listening to Kafka stream")
 
-# record = parse_notice(infile)
-# decision = decide(record)
-# print(decision)
+    while True:
+        for message in consumer.consume():
+            record = parse_notice(message.value())
+            if record is not None:
+                decision = decide(record)
+                post_on_slack(decision=decision, slack_client=slack_client)
