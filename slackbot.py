@@ -8,14 +8,13 @@ import logging
 import os
 from base64 import b64decode
 from io import BytesIO
-from pprint import pprint
+from pathlib import Path
 from typing import Dict
 
 import numpy as np
 from astropy.table import Table  # type: ignore
 
 import astropy_healpix as ah  # type: ignore
-from confluent_kafka import TopicPartition  # type: ignore
 from gcn_kafka import Consumer  # type: ignore
 from slack import WebClient
 
@@ -37,23 +36,31 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def parse_notice(record_str: str) -> dict | None:
+def parse_notice(record_raw: str) -> dict | None:
     """
     Parse the json of the notice and extract location and distance
     """
-    record = json.loads(record_str)
+    record = json.loads(record_raw)
 
-    if record["superevent_id"][0] not in ["S"]:
+    event_id = record["superevent_id"]
+
+    if event_id[0] not in ["S"]:
+        logger.info(f"{event_id}: Mock signal. Discarding")
         return None
 
     if record["alert_type"] == "RETRACTION":
-        print(record["superevent_id"], "was retracted")
+        logger.info(f"{event_id}: Retracted")
         return None
 
     # Respond only to 'CBC' events. Change 'CBC' to 'Burst' to respond to
     # only unmodeled burst events.
     if record["event"]["group"] not in ["CBC", "Burst"]:
+        logger.info(
+            f"{event_id}: Pipeline neither 'CBC' nor 'Burst' {record['event']['group']}. Discarding"
+        )
         return None
+
+    logger.info(f"{event_id}: Received. Evaluating now")
 
     # Parse sky map
     skymap_str = record.get("event", {}).pop("skymap")
@@ -67,12 +74,20 @@ def parse_notice(record_str: str) -> dict | None:
         )
         ra, dec = ah.healpix_to_lonlat(ipix, ah.level_to_nside(level), order="nested")
 
-        dist = skymap.meta["DISTMEAN"]
-        dist_unc = skymap.meta["DISTSTD"]
+        dist = skymap.meta.get("DISTMEAN")
+        dist_unc = skymap.meta.get("DISTSTD")
 
-        return {"loc": [ra, dec], "dist": [dist, dist_unc], "record": record}
+        logger.info(f"{event_id}: Has skymap. Continuing")
+
+        return {
+            "loc": [ra, dec],
+            "dist": [dist, dist_unc],
+            "record": record,
+            "event_id": event_id,
+        }
 
     else:
+        logger.info(f"{event_id}: Has no skymap. Discarding")
         return None
 
 
@@ -108,6 +123,7 @@ def decide(record: dict) -> dict | None:
                 status["status"] = "go_deep"
                 reason.append(f"FAR < 1/century ({far:.2E})")
                 status["reason"] = reason
+                logger.info(f"{event_id}: GO DEEP")
 
                 return status
 
@@ -115,6 +131,7 @@ def decide(record: dict) -> dict | None:
                 status["status"] = "go_wide"
                 reason.append(f"1/century < FAR < 1/decade ({far:.2E})")
                 status["reason"] = reason
+                logger.info(f"{event_id}: GO WIDE")
 
                 return status
 
@@ -126,6 +143,7 @@ def decide(record: dict) -> dict | None:
             status["status"] = "deliberate"
             reason.append(f"FAR < 1/year ({far:.2E})")
             status["reason"] = reason
+            logger.info(f"{event_id}: DELIBERATE")
 
             return status
 
@@ -139,11 +157,14 @@ def decide(record: dict) -> dict | None:
                 reason.append(f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})")
             status["reason"] = reason
 
+            logger.info(f"{event_id}: NO GO")
+
             return status
 
         return status
 
     else:
+        logger.info(f"{event_id}: Empty record. Discarding")
         return None
 
 
@@ -188,6 +209,36 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
     return None
 
 
+def event_exists(event_id) -> bool:
+    """
+    Check if the event has already been processed
+    """
+    event_file = Path(__file__).parents[0] / "events" / f"{event_id}.json"
+
+    if event_file.is_file():
+        logger.info("Event has already been processed, skipping.")
+        return True
+    else:
+        return False
+
+
+def save_event(record: dict) -> None:
+    """
+    Save the event as json
+    """
+    event_dir = Path(__file__).parents[0] / "events"
+    event_dir.mkdir(exists_ok=True, parents=True)
+
+    event_file = event_dir / f"{event_id}.json"
+
+    with open(event_file, "w") as f:
+        json.dump(event_file, f)
+
+    logger.info(f"Saved event to {event_file}")
+
+    return None
+
+
 def check_credentials():
     if LVK_GCN_TOKEN is None or LVK_GCN_ID is None or SLACK_TOKEN is None:
         raise ValueError(f"You need to export 'LVK_GCN_ID' and 'LVK_GCN_TOKEN'")
@@ -198,7 +249,9 @@ if __name__ == "__main__":
 
     check_credentials()
 
+    config = {"group.id": "", "auto.offset.reset": "earliest"}
     consumer = Consumer(
+        config=config,
         client_id=LVK_GCN_ID,
         client_secret=LVK_GCN_TOKEN,
     )
@@ -207,8 +260,15 @@ if __name__ == "__main__":
     logger.info("Listening to Kafka stream")
 
     while True:
-        for message in consumer.consume():
-            record = parse_notice(message.value())
-            if record is not None:
-                decision = decide(record)
+        for message in consumer.consume(timeout=1):
+            logger.info("Got event")
+            consumer.commit(message)
+            record = parse_notice(record_raw=message.value())
+
+            if (
+                record is not None
+                and event_exists(event_id=record["event_id"]) is False
+            ):
+                save_event(record=record)
+                decision = decide(record=record)
                 post_on_slack(decision=decision, slack_client=slack_client)
