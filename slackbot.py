@@ -80,10 +80,11 @@ def parse_notice(record_raw: str) -> dict | None:
         logger.info(f"{event_id}: Has skymap. Continuing")
 
         return {
-            "loc": [ra, dec],
+            "loc": [ra.deg, dec.deg],
             "dist": [dist, dist_unc],
             "record": record,
             "event_id": event_id,
+            "pipeline": record["event"]["group"],
         }
 
     else:
@@ -104,21 +105,76 @@ def decide(record: dict) -> dict | None:
         event = details["event"]
         far = event["far"]
         classification = event["classification"]
-        has_ns = event["properties"]["HasNS"]
-        has_remnant = event["properties"]["HasRemnant"]
-        bns = classification["BNS"]
-        combined_ns = classification["BNS"] + classification["NSBH"]
 
         status["id"] = event_id
         status["FAR"] = far
-        status["pNS"] = combined_ns
-        status["hasRemnant"] = has_remnant
 
-        if (
-            combined_ns > PNS_THRESHOLD_GO
-            and has_ns > HAS_NS_THRESHOLD_GO
-            and has_remnant > HAS_REMNANT_THRESHOLD
-        ):
+        pipeline = record["pipeline"]
+        status["pipeline"] = pipeline
+
+        if pipeline == "CBC":
+            has_ns = event["properties"].get("HasNS")
+            has_remnant = event["properties"].get("HasRemnant")
+            bns = classification["BNS"]
+            combined_ns = classification["BNS"] + classification["NSBH"]
+
+            status["pNS"] = combined_ns
+            status["hasRemnant"] = has_remnant
+
+            if (
+                combined_ns > PNS_THRESHOLD_GO
+                and has_ns > HAS_NS_THRESHOLD_GO
+                and has_remnant > HAS_REMNANT_THRESHOLD
+            ):
+                if far < FAR_THRESHOLD_CENTURY:
+                    status["status"] = "go_deep"
+                    reason.append(f"FAR < 1/century ({far:.2E})")
+                    status["reason"] = reason
+                    logger.info(f"{event_id}: GO DEEP")
+
+                    return status
+
+                if far < FAR_THRESHOLD_DECADE:
+                    status["status"] = "go_wide"
+                    reason.append(f"1/century < FAR < 1/decade ({far:.2E})")
+                    status["reason"] = reason
+                    logger.info(f"{event_id}: GO WIDE")
+
+                    return status
+
+            if (
+                far < FAR_THRESHOLD_YEAR
+                and combined_ns > PNS_THRESHOLD_DELIBERATE
+                and has_ns > HAS_NS_THRESHOLD_DELIBERATE
+            ):
+                status["status"] = "deliberate"
+                reason.append(f"FAR < 1/year ({far:.2E})")
+                status["reason"] = reason
+                logger.info(f"{event_id}: DELIBERATE")
+
+                return status
+
+            else:
+                status["status"] = "nogo"
+                if far >= FAR_THRESHOLD_YEAR:
+                    reason.append(f"FAR >= 1/year ({far:.2E})")
+                if has_ns <= HAS_NS_THRESHOLD_DELIBERATE:
+                    reason.append(
+                        f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns:.2f})"
+                    )
+                if combined_ns <= PNS_THRESHOLD_DELIBERATE:
+                    reason.append(
+                        f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})"
+                    )
+                status["reason"] = reason
+
+                logger.info(f"{event_id}: NO GO")
+
+                return status
+
+            return status
+
+        if pipeline == "Burst":
             if far < FAR_THRESHOLD_CENTURY:
                 status["status"] = "go_deep"
                 reason.append(f"FAR < 1/century ({far:.2E})")
@@ -135,33 +191,24 @@ def decide(record: dict) -> dict | None:
 
                 return status
 
-        if (
-            far < FAR_THRESHOLD_YEAR
-            and combined_ns > PNS_THRESHOLD_DELIBERATE
-            and has_ns > HAS_NS_THRESHOLD_DELIBERATE
-        ):
-            status["status"] = "deliberate"
-            reason.append(f"FAR < 1/year ({far:.2E})")
-            status["reason"] = reason
-            logger.info(f"{event_id}: DELIBERATE")
+            if far < FAR_THRESHOLD_YEAR:
+                status["status"] = "deliberate"
+                reason.append(f"FAR < 1/year ({far:.2E})")
+                status["reason"] = reason
+                logger.info(f"{event_id}: DELIBERATE")
 
-            return status
+                return status
 
-        else:
-            status["status"] = "nogo"
-            if far >= FAR_THRESHOLD_YEAR:
+            else:
+                status["status"] = "nogo"
                 reason.append(f"FAR >= 1/year ({far:.2E})")
-            if has_ns <= HAS_NS_THRESHOLD_DELIBERATE:
-                reason.append(f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns:.2f})")
-            if combined_ns <= PNS_THRESHOLD_DELIBERATE:
-                reason.append(f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})")
-            status["reason"] = reason
+                status["reason"] = reason
 
-            logger.info(f"{event_id}: NO GO")
+                logger.info(f"{event_id}: NO GO")
+
+                return status
 
             return status
-
-        return status
 
     else:
         logger.info(f"{event_id}: Empty record. Discarding")
@@ -172,11 +219,13 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
     """
     Post the decision on Slack
     """
+    pipeline = decision["pipeline"]
+
     if decision is None:
         return None
 
     if decision["status"] == "nogo":
-        text = f"*{decision['id']}: NO GO*\n"
+        text = f"*{decision['id']} ({pipeline} event): NO GO*\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
@@ -184,11 +233,15 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
                 text += f"{r}   "
 
     if decision["status"] == "deliberate":
-        text = f"*{decision['id']}: DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
-        text += f"Parameters: \nFAR: {decision['FAR']:.2E}\np(NS): {decision['pNS']:.2f}\nHas Remnant: {decision['hasRemnant']:.2f}"
+        text = f"*{decision['id']} ({pipeline} event): DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
+
+        if pipeline == "CBC":
+            text += f"Parameters: \nFAR: {decision['FAR']:.2E}\np(NS): {decision['pNS']:.2f}\nHas Remnant: {decision['hasRemnant']:.2f}"
+        if pipeline == "Burst":
+            text += f"Parameters: \nFAR: {decision['FAR']:.2E}"
 
     if decision["status"] == "go_wide":
-        text = f"*{decision['id']}: GO WIDE*\n"
+        text = f"*{decision['id']} ({pipeline} event): GO WIDE*\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
@@ -196,7 +249,7 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
                 text += f"{r}   "
 
     if decision["status"] == "go_deep":
-        text = f"*{decision['id']}: GO DEEP*\n"
+        text = f"*{decision['id']} ({pipeline} event): GO DEEP*\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
