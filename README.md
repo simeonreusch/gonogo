@@ -11,7 +11,7 @@ Expected rate   | 3 nights/month   | 5 nights/month |
 FAR | < 1/century | < 1/decade | < 1/year | >= 1/year | 
 Has neutron star | > 0.9 | > 0.9 | > 0.1 | 
 Has remnant | `true` | `true` | 
-pNS | > 0.5 | > 0.5 | > 0.1 |
+p(BNS + NSBH) | > 0.5 | > 0.5 | > 0.1 |
 
 ## How to run
 You need Kafka credentials, obtain them from 
