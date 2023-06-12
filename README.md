@@ -14,4 +14,4 @@ Has remnant | `true` | `true` |
 p(BNS + NSBH) | > 0.5 | > 0.5 | > 0.1 |
 
 ## How to run
-You need Kafka credentials, obtain them from the [GCN page](https://gcn.nasa.gov/quickstart), and a Slackbot token from the [Slack API](api.slack.com).
+You need Kafka credentials (obtain them from the [GCN page](https://gcn.nasa.gov/quickstart)) and a Slackbot token from the [Slack API](api.slack.com).
