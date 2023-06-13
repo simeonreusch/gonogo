@@ -2,6 +2,7 @@
 # Author: Simeon Reusch (simeon.reusch@desy.de)
 # License: BSD-3-Clause
 
+import argparse
 import datetime
 import json
 import logging
@@ -11,10 +12,9 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict
 
+import astropy_healpix as ah  # type: ignore
 import numpy as np
 from astropy.table import Table  # type: ignore
-
-import astropy_healpix as ah  # type: ignore
 from gcn_kafka import Consumer  # type: ignore
 from slack import WebClient
 
@@ -106,6 +106,7 @@ def decide(record: dict) -> dict | None:
         event = details["event"]
         far = event["far"]
         classification = event["classification"]
+        status["url"] = details["urls"].get("gracedb")
 
         status["id"] = event_id
         status["FAR"] = far
@@ -221,12 +222,15 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
     Post the decision on Slack
     """
     pipeline = decision["pipeline"]
+    url = decision["url"]
 
     if decision is None:
         return None
 
     if decision["status"] == "nogo":
         text = f"*{decision['id']} ({pipeline} event): NO GO*\n"
+        if url is not None:
+            text += f"<{url}|View event>\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
@@ -235,6 +239,8 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
 
     if decision["status"] == "deliberate":
         text = f"*{decision['id']} ({pipeline} event): DELIBERATE*\nDoes not warrant an automatic Go, but it needs to be discussed if ToO or serendipitous coverage is the right strategy (based on localization and parameters).\n"
+        if url is not None:
+            text += f"<{url}|View event>\n"
 
         if pipeline == "CBC":
             text += f"Parameters: \nFAR: {decision['FAR']:.2E}\np(NS): {decision['pNS']:.2f}\nHas Remnant: {decision['hasRemnant']:.2f}"
@@ -243,6 +249,8 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
 
     if decision["status"] == "go_wide":
         text = f"*{decision['id']} ({pipeline} event): GO WIDE*\n"
+        if url is not None:
+            text += f"<{url}|View event>\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
@@ -251,6 +259,8 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
 
     if decision["status"] == "go_deep":
         text = f"*{decision['id']} ({pipeline} event): GO DEEP*\n"
+        if url is not None:
+            text += f"<{url}|View event>\n"
         reason = decision["reason"]
         if len(reason) > 0:
             text += "Reason: "
@@ -258,6 +268,7 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
                 text += f"{r}    "
 
     logger.info(f"Posting on Slack:\n{text}")
+
     slack_client.chat_postMessage(channel="#go-nogo", text=text)
 
     return None
@@ -310,9 +321,21 @@ def check_credentials():
 if __name__ == "__main__":
     slack_client = WebClient(token=SLACK_TOKEN)
 
+    parser = argparse.ArgumentParser(
+        description="Used to obtain forced photometry for selection of SNe in parallel"
+    )
+    parser.add_argument("-debug", "-d", action="store_true", help="Run in Debug mode")
+
+    cli = parser.parse_args()
+
     check_credentials()
 
-    config = {"group.id": LVK_GCN_GROUP, "auto.offset.reset": "earliest"}
+    if cli.debug:
+        config = {"group.id": "", "auto.offset.reset": "earliest"}
+
+    else:
+        config = {"group.id": LVK_GCN_GROUP, "auto.offset.reset": "earliest"}
+
     consumer = Consumer(
         config=config,
         client_id=LVK_GCN_ID,
@@ -328,10 +351,16 @@ if __name__ == "__main__":
             consumer.commit(message)
             record = parse_notice(record_raw=message.value())
 
-            if (
-                record is not None
-                and event_exists(event_id=record["event_id"]) is False
-            ):
-                save_event(record=record)
-                decision = decide(record=record)
-                post_on_slack(decision=decision, slack_client=slack_client)
+            if cli.debug:
+                if record is not None:
+                    decision = decide(record=record)
+                    print(decision)
+
+            else:
+                if (
+                    record is not None
+                    and event_exists(event_id=record["event_id"]) is False
+                ):
+                    save_event(record=record)
+                    decision = decide(record=record)
+                    post_on_slack(decision=decision, slack_client=slack_client)
