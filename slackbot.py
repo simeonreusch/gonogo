@@ -114,7 +114,8 @@ def decide(record: dict) -> dict | None:
 
         period = 1 / far * u.s
         period_year = period.to(u.year)
-        status["period_year"] = period_year
+        far_yearly = 1 / period_year.value
+        status["far_yearly"] = far_yearly
 
         pipeline = record["pipeline"]
         status["pipeline"] = pipeline
@@ -135,7 +136,7 @@ def decide(record: dict) -> dict | None:
             ):
                 if far < FAR_THRESHOLD_CENTURY:
                     status["status"] = "go_deep"
-                    reason.append(f"FAR < 1/century ({far:.2E} Hz)")
+                    reason.append(f"FAR < 1/century ({far_yearly:.1f}/year)")
                     status["reason"] = reason
                     logger.info(f"{event_id}: GO DEEP")
 
@@ -143,7 +144,7 @@ def decide(record: dict) -> dict | None:
 
                 if far < FAR_THRESHOLD_DECADE:
                     status["status"] = "go_wide"
-                    reason.append(f"1/century < FAR < 1/decade ({far:.2E} Hz)")
+                    reason.append(f"1/century < FAR < 1/decade ({far_yearly:.1f}/year)")
                     status["reason"] = reason
                     logger.info(f"{event_id}: GO WIDE")
 
@@ -155,7 +156,7 @@ def decide(record: dict) -> dict | None:
                 and has_ns > HAS_NS_THRESHOLD_DELIBERATE
             ):
                 status["status"] = "deliberate"
-                reason.append(f"FAR < 1/year (1/{period_year.value:.2f} year)")
+                reason.append(f"FAR < 1/year ({far_yearly:.1f}/year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: DELIBERATE")
 
@@ -164,7 +165,7 @@ def decide(record: dict) -> dict | None:
             else:
                 status["status"] = "nogo"
                 if far >= FAR_THRESHOLD_YEAR:
-                    reason.append(f"FAR >= 1/year (1/{period_year.value:.2f} year)")
+                    reason.append(f"FAR >= 1/year ({far_yearly:.1f}/year)")
                 if has_ns <= HAS_NS_THRESHOLD_DELIBERATE:
                     reason.append(
                         f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns:.2f})"
@@ -184,7 +185,7 @@ def decide(record: dict) -> dict | None:
         elif pipeline == "Burst":
             if far < FAR_THRESHOLD_CENTURY:
                 status["status"] = "go_deep"
-                reason.append(f"FAR < 1/century (1/{period_year.value:.2f} year)")
+                reason.append(f"FAR < 1/century ({far_yearly:.1f}/year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: GO DEEP")
 
@@ -192,9 +193,7 @@ def decide(record: dict) -> dict | None:
 
             if far < FAR_THRESHOLD_DECADE:
                 status["status"] = "go_wide"
-                reason.append(
-                    f"1/century < FAR < 1/decade (1/{period_year.value:.2f} year)"
-                )
+                reason.append(f"1/century < FAR < 1/decade ({far_yearly:.1f}/year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: GO WIDE")
 
@@ -202,7 +201,7 @@ def decide(record: dict) -> dict | None:
 
             if far < FAR_THRESHOLD_YEAR:
                 status["status"] = "deliberate"
-                reason.append(f"FAR < 1/year (1/{period_year.value:.2f} year)")
+                reason.append(f"FAR < 1/year ({far_yearly:.1f}/year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: DELIBERATE")
 
@@ -210,7 +209,7 @@ def decide(record: dict) -> dict | None:
 
             else:
                 status["status"] = "nogo"
-                reason.append(f"FAR >= 1/year (1/{period_year.value:.2f} year)")
+                reason.append(f"FAR >= 1/year ({far_yearly:.1f}/year)")
                 status["reason"] = reason
 
                 logger.info(f"{event_id}: NO GO")
@@ -373,7 +372,6 @@ if __name__ == "__main__":
                     post_on_slack(
                         decision=decision, slack_client=slack_client, debug=True
                     )
-
             else:
                 if (
                     record is not None
