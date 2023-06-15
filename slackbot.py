@@ -12,6 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict
 
+import astropy.units as u
 import astropy_healpix as ah  # type: ignore
 import numpy as np
 from astropy.table import Table  # type: ignore
@@ -111,6 +112,10 @@ def decide(record: dict) -> dict | None:
         status["id"] = event_id
         status["FAR"] = far
 
+        period = 1 / far * u.s
+        period_year = period.to(u.year)
+        status["period_year"] = period_year
+
         pipeline = record["pipeline"]
         status["pipeline"] = pipeline
 
@@ -130,7 +135,7 @@ def decide(record: dict) -> dict | None:
             ):
                 if far < FAR_THRESHOLD_CENTURY:
                     status["status"] = "go_deep"
-                    reason.append(f"FAR < 1/century ({far:.2E})")
+                    reason.append(f"FAR < 1/century ({far:.2E} Hz)")
                     status["reason"] = reason
                     logger.info(f"{event_id}: GO DEEP")
 
@@ -138,7 +143,7 @@ def decide(record: dict) -> dict | None:
 
                 if far < FAR_THRESHOLD_DECADE:
                     status["status"] = "go_wide"
-                    reason.append(f"1/century < FAR < 1/decade ({far:.2E})")
+                    reason.append(f"1/century < FAR < 1/decade ({far:.2E} Hz)")
                     status["reason"] = reason
                     logger.info(f"{event_id}: GO WIDE")
 
@@ -150,7 +155,7 @@ def decide(record: dict) -> dict | None:
                 and has_ns > HAS_NS_THRESHOLD_DELIBERATE
             ):
                 status["status"] = "deliberate"
-                reason.append(f"FAR < 1/year ({far:.2E})")
+                reason.append(f"FAR < 1/year (1/{period_year.value:.2f} year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: DELIBERATE")
 
@@ -159,7 +164,7 @@ def decide(record: dict) -> dict | None:
             else:
                 status["status"] = "nogo"
                 if far >= FAR_THRESHOLD_YEAR:
-                    reason.append(f"FAR >= 1/year ({far:.2E})")
+                    reason.append(f"FAR >= 1/year (1/{period_year.value:.2f} year)")
                 if has_ns <= HAS_NS_THRESHOLD_DELIBERATE:
                     reason.append(
                         f"hasNS <= {HAS_NS_THRESHOLD_DELIBERATE} ({has_ns:.2f})"
@@ -179,7 +184,7 @@ def decide(record: dict) -> dict | None:
         elif pipeline == "Burst":
             if far < FAR_THRESHOLD_CENTURY:
                 status["status"] = "go_deep"
-                reason.append(f"FAR < 1/century ({far:.2E})")
+                reason.append(f"FAR < 1/century (1/{period_year.value:.2f} year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: GO DEEP")
 
@@ -187,7 +192,9 @@ def decide(record: dict) -> dict | None:
 
             if far < FAR_THRESHOLD_DECADE:
                 status["status"] = "go_wide"
-                reason.append(f"1/century < FAR < 1/decade ({far:.2E})")
+                reason.append(
+                    f"1/century < FAR < 1/decade (1/{period_year.value:.2f} year)"
+                )
                 status["reason"] = reason
                 logger.info(f"{event_id}: GO WIDE")
 
@@ -195,7 +202,7 @@ def decide(record: dict) -> dict | None:
 
             if far < FAR_THRESHOLD_YEAR:
                 status["status"] = "deliberate"
-                reason.append(f"FAR < 1/year ({far:.2E})")
+                reason.append(f"FAR < 1/year (1/{period_year.value:.2f} year)")
                 status["reason"] = reason
                 logger.info(f"{event_id}: DELIBERATE")
 
@@ -203,7 +210,7 @@ def decide(record: dict) -> dict | None:
 
             else:
                 status["status"] = "nogo"
-                reason.append(f"FAR >= 1/year ({far:.2E})")
+                reason.append(f"FAR >= 1/year (1/{period_year.value:.2f} year)")
                 status["reason"] = reason
 
                 logger.info(f"{event_id}: NO GO")
@@ -220,7 +227,9 @@ def decide(record: dict) -> dict | None:
         return None
 
 
-def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
+def post_on_slack(
+    decision: dict | None, slack_client: WebClient, debug: bool = False
+) -> None:
     """
     Post the decision on Slack
     """
@@ -270,9 +279,12 @@ def post_on_slack(decision: dict | None, slack_client: WebClient) -> None:
             for r in reason:
                 text += f"{r}    "
 
-    logger.info(f"Posting on Slack:\n{text}")
+    if debug:
+        logger.info(f"Would post on Slack:\n{text}")
 
-    slack_client.chat_postMessage(channel="#go-nogo", text=text)
+    if not debug:
+        logger.info(f"Posting on Slack:\n{text}")
+        slack_client.chat_postMessage(channel="#go-nogo", text=text)
 
     return None
 
@@ -358,6 +370,9 @@ if __name__ == "__main__":
                 if record is not None:
                     decision = decide(record=record)
                     print(decision)
+                    post_on_slack(
+                        decision=decision, slack_client=slack_client, debug=True
+                    )
 
             else:
                 if (
@@ -366,4 +381,6 @@ if __name__ == "__main__":
                 ):
                     save_event(record=record)
                     decision = decide(record=record)
-                    post_on_slack(decision=decision, slack_client=slack_client)
+                    post_on_slack(
+                        decision=decision, slack_client=slack_client, debug=False
+                    )
