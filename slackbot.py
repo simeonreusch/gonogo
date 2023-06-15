@@ -166,7 +166,7 @@ def decide(record: dict) -> dict | None:
                     )
                 if combined_ns <= PNS_THRESHOLD_DELIBERATE:
                     reason.append(
-                        f"pNS <=  {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})"
+                        f"pNS <= {PNS_THRESHOLD_DELIBERATE} ({combined_ns:.2f})"
                     )
                 status["reason"] = reason
 
@@ -176,7 +176,7 @@ def decide(record: dict) -> dict | None:
 
             return status
 
-        if pipeline == "Burst":
+        elif pipeline == "Burst":
             if far < FAR_THRESHOLD_CENTURY:
                 status["status"] = "go_deep"
                 reason.append(f"FAR < 1/century ({far:.2E})")
@@ -212,8 +212,11 @@ def decide(record: dict) -> dict | None:
 
             return status
 
+        else:
+            return None
+
     else:
-        logger.info(f"{event_id}: Empty record. Discarding")
+        logger.info(f"Empty record. Discarding")
         return None
 
 
