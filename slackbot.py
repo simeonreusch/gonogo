@@ -23,7 +23,7 @@ LVK_GCN_ID = os.environ.get("LVK_GCN_ID")
 LVK_GCN_TOKEN = os.environ.get("LVK_GCN_TOKEN")
 LVK_GCN_GROUP = os.environ.get("LVK_GCN_GROUP")  # this can be an arbitrary string
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN_GONOGO")
-HEALTHCHECKS_URL = os.environ.get("HEALTCHECKS_URL")
+HEALTHCHECKS_URL = os.environ.get("HEALTHCHECKS_URL")
 
 PNS_THRESHOLD_DELIBERATE: float = 0.1
 PNS_THRESHOLD_GO: float = 0.5
