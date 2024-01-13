@@ -3,7 +3,6 @@
 # License: BSD-3-Clause
 
 import argparse
-import datetime
 import json
 import logging
 import os
@@ -15,6 +14,7 @@ from typing import Dict
 import astropy.units as u
 import astropy_healpix as ah  # type: ignore
 import numpy as np
+import requests
 from astropy.table import Table  # type: ignore
 from gcn_kafka import Consumer  # type: ignore
 from slack import WebClient
@@ -23,6 +23,7 @@ LVK_GCN_ID = os.environ.get("LVK_GCN_ID")
 LVK_GCN_TOKEN = os.environ.get("LVK_GCN_TOKEN")
 LVK_GCN_GROUP = os.environ.get("LVK_GCN_GROUP")  # this can be an arbitrary string
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN_GONOGO")
+HEALTHCHECKS_URL = os.environ.get("HEALTCHECKS_URL")
 
 PNS_THRESHOLD_DELIBERATE: float = 0.1
 PNS_THRESHOLD_GO: float = 0.5
@@ -48,6 +49,9 @@ def parse_notice(record_raw: str) -> dict | None:
 
     if event_id[0] not in ["S"]:
         logger.info(f"{event_id}: Mock signal. Discarding")
+        if HEALTHCHECKS_URL is not None:
+            requests.get(HEALTHCHECKS_URL)
+            logger.info("Sent alive ping to healthchecks.io")
         return None
 
     if record["alert_type"] == "RETRACTION":
